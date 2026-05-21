@@ -21,6 +21,7 @@ add_executable(wrenchbuild
 	globals/audio_wad.cpp
 	globals/bonus_wad.cpp
 	globals/boot_wad.cpp
+	globals/gadget_wad.cpp
 	globals/global_wad.cpp
 	globals/hud_wad.cpp
 	globals/irx_wad.cpp

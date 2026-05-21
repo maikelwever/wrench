@@ -29,6 +29,9 @@ static void unpack_moby_class(
 static void pack_moby_class(
 	OutputStream& dest, const MobyClassAsset& src, BuildConfig config, const char* hint);
 static void unpack_phat_class(MobyClassAsset& dest, InputStream& src, BuildConfig config);
+static void unpack_dl_beta_gadget_class(MobyClassAsset& dest, InputStream& src, BuildConfig config);
+static bool is_dl_beta_gadget_class(InputStream& src);
+static bool looks_like_mesh_only_class(InputStream& src, ByteRange range);
 static void unpack_mesh_only_class(
 	MobyClassAsset& dest, InputStream& src, f32 scale, bool animated, BuildConfig config);
 static void unpack_moby_mesh(
@@ -43,6 +46,49 @@ static s32 count_materials(const CollectionAsset& materials);
 static void unpack_materials(CollectionAsset& materials, GLTF::ModelFile& gltf);
 static bool test_moby_class_core(
 	std::vector<u8>& src, AssetType type, BuildConfig config, const char* hint, AssetTestMode mode);
+
+packed_struct(DlBetaGadgetClassHeader,
+	/* 0x00 */ s32 version;
+	/* 0x04 */ s32 section_count;
+	/* 0x08 */ ByteRange sblk;
+	/* 0x10 */ ByteRange data;
+)
+static_assert(sizeof(DlBetaGadgetClassHeader) == 0x18);
+
+packed_struct(DlBetaGadgetSblkHeader,
+	/* 0x00 */ s32 magic;
+	/* 0x04 */ s32 version;
+	/* 0x08 */ s32 kind;
+	/* 0x0c */ s32 name;
+	/* 0x10 */ s32 flags;
+	/* 0x14 */ s16 unknown_14;
+	/* 0x16 */ s16 upload_count;
+	/* 0x18 */ s16 command_count;
+	/* 0x1a */ s16 unknown_1a;
+	/* 0x1c */ s32 header_size;
+	/* 0x20 */ s32 command_table_offset;
+	/* 0x24 */ s32 vu_base;
+	/* 0x28 */ s32 data_size_a;
+	/* 0x2c */ s32 data_size_b;
+	/* 0x30 */ s32 unknown_30;
+	/* 0x34 */ s32 upload_data_offset;
+	/* 0x38 */ s32 unknown_38;
+	/* 0x3c */ s32 unknown_3c;
+)
+static_assert(sizeof(DlBetaGadgetSblkHeader) == 0x40);
+
+packed_struct(DlBetaGadgetSblkUpload,
+	/* 0x0 */ s32 vu_addr_or_kind;
+	/* 0x4 */ s32 count_and_flags;
+	/* 0x8 */ s32 source_offset;
+)
+static_assert(sizeof(DlBetaGadgetSblkUpload) == 0x0c);
+
+packed_struct(DlBetaGadgetSblkCommand,
+	/* 0x0 */ s32 opcode_and_param;
+	/* 0x4 */ s32 argument;
+)
+static_assert(sizeof(DlBetaGadgetSblkCommand) == 0x08);
 
 on_load(MobyClass, []() {
 	MobyClassAsset::funcs.unpack_rac1 = wrap_hint_unpacker_func<MobyClassAsset>(unpack_moby_class);
@@ -74,6 +120,11 @@ static void unpack_moby_class(
 	const char* type = next_hint(&hint);
 	bool is_mesh_only = strcmp(type, "meshonly") == 0;
 	
+	if (strcmp(type, "dlbeta_gadget") == 0) {
+		unpack_dl_beta_gadget_class(dest, src, config);
+		return;
+	}
+	
 	if (is_mesh_only) {
 		f32 scale = atof(next_hint(&hint));
 		const char* animated_str = next_hint(&hint);
@@ -90,6 +141,86 @@ static void unpack_moby_class(
 	}
 	
 	unpack_phat_class(dest, src, config);
+}
+
+static void unpack_dl_beta_gadget_class(MobyClassAsset& dest, InputStream& src, BuildConfig config)
+{
+	if (is_dl_beta_gadget_class(src)) {
+		DlBetaGadgetClassHeader header = src.read<DlBetaGadgetClassHeader>(0);
+		if (looks_like_mesh_only_class(src, header.data)) {
+			SubInputStream data(src, header.data.offset, header.data.size);
+			unpack_mesh_only_class(dest, data, 1.f, false, config);
+			return;
+		}
+	}
+	
+	// The Deadlocked beta GADGET.WAD entries are structured class/model blobs.
+	// They wrap native PS2 mesh data in an SBlk/mn00 metadata block, but that
+	// metadata table is not the retail MobyPacketEntry table that meshonly uses.
+	// Preserve the full blob until the SBlk table is fully mapped.
+	unpack_asset_impl(dest.core<BinaryAsset>(), src, nullptr, config);
+}
+
+static bool is_dl_beta_gadget_class(InputStream& src)
+{
+	if (src.size() < sizeof(DlBetaGadgetClassHeader)) {
+		return false;
+	}
+	
+	DlBetaGadgetClassHeader header = src.read<DlBetaGadgetClassHeader>(0);
+	if (header.version != 3 || header.section_count != 2) {
+		return false;
+	}
+	if (header.sblk.offset < sizeof(DlBetaGadgetClassHeader) || header.sblk.empty()) {
+		return false;
+	}
+	if (header.data.offset < header.sblk.offset + header.sblk.size || header.data.empty()) {
+		return false;
+	}
+	if (header.data.offset + header.data.size != src.size()) {
+		return false;
+	}
+	if (header.sblk.size < sizeof(DlBetaGadgetSblkHeader)) {
+		return false;
+	}
+	
+	DlBetaGadgetSblkHeader sblk = src.read<DlBetaGadgetSblkHeader>(header.sblk.offset);
+	if (sblk.magic != 0x6b6c4253 || sblk.name != 0x30306e6d) { // SBlk, mn00
+		return false;
+	}
+	if (sblk.version != 3 || sblk.kind != 4 || sblk.header_size != sizeof(DlBetaGadgetSblkHeader)) {
+		return false;
+	}
+	if (sblk.command_table_offset != sblk.header_size + sblk.upload_count * (s32) sizeof(DlBetaGadgetSblkUpload)) {
+		return false;
+	}
+	if (sblk.command_table_offset + sblk.command_count * (s32) sizeof(DlBetaGadgetSblkCommand) > header.sblk.size) {
+		return false;
+	}
+	return sblk.data_size_a == header.data.size && sblk.data_size_b == header.data.size;
+}
+
+static bool looks_like_mesh_only_class(InputStream& src, ByteRange range)
+{
+	if (range.size < sizeof(MOBY::MobyArmorHeader)) {
+		return false;
+	}
+	
+	MOBY::MobyArmorHeader header = src.read<MOBY::MobyArmorHeader>(range.offset);
+	if (header.packet_table_offset < sizeof(MOBY::MobyArmorHeader)) {
+		return false;
+	}
+	if (header.packet_table_offset >= range.size) {
+		return false;
+	}
+	if (header.info.high_lod_count == 0) {
+		return false;
+	}
+	s32 packet_count = header.info.high_lod_count + header.info.low_lod_count + header.info.metal_count;
+	if (packet_count <= 0 || packet_count > 64) {
+		return false;
+	}
+	return header.packet_table_offset + packet_count * (s32) sizeof(MOBY::MobyPacketEntry) <= range.size;
 }
 
 static void pack_moby_class(

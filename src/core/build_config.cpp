@@ -68,6 +68,8 @@ Game game_from_string(const std::string& game)
 	if (game == "gc") return Game::GC;
 	if (game == "uya") return Game::UYA;
 	if (game == "dl") return Game::DL;
+	if (game == "dlbeta") return Game::DL;
+	if (game == "dlproto") return Game::DL;
 	return Game::UNKNOWN;
 }
 

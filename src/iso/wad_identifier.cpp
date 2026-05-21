@@ -46,6 +46,7 @@ static WadFileDescription WAD_FILE_TYPES[] = {
 	{"gadget", Game::GC     , WadType::GADGET     , 0x03c8, 0x8, 0, 0x586}, // 0xb1
 	{"gadget", Game::UYA    , WadType::GADGET     , 0x03c8, 0x8, 0x587, 0x1000}, // 0xa5d
 	{"gadget", Game::UNKNOWN, WadType::GADGET     , 0x03c8},
+	{"gadget", Game::DL     , WadType::GADGET     , 0x0248},
 	{"armor" , Game::GC     , WadType::ARMOR      , 0x00f8},
 	{"level" , Game::UNKNOWN, WadType::LEVEL      , 0x0060},
 	{"audio" , Game::GC     , WadType::LEVEL_AUDIO, 0x1018},

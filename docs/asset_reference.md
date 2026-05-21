@@ -559,7 +559,10 @@ No attributes.
 
 *Children*
 
-No children.
+| Name | Description | Allowed Types | Required | Games |
+| - | - | - | - | - |
+| gadgets | Deadlocked beta gadget classes. | MobyClass\[\], Binary\[\] | No | DL |
+
 
 ### HudWad
 

@@ -821,6 +821,16 @@ AssetType BonusWad {
 
 AssetType GadgetWad {
 	wad: true
+	
+	Child gadgets {
+		desc: "Deadlocked beta gadget classes."
+		allowed_types: ["Collection"]
+		required: false
+		games: [4]
+		Child child {
+			allowed_types: ["MobyClass" "Binary"]
+		}
+	}
 }
 
 AssetType HudWad {
